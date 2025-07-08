@@ -4,6 +4,7 @@ const cors = require('cors');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { URLSearchParams } = require('url');
+const path = require('path');
 
 const app = express();
 
@@ -14,6 +15,9 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// Обслуговування статичних файлів з папки 'public'
+app.use(express.static(path.join(__dirname, 'public')));
 
 class HdRezkaStream {
     constructor(season, episode) {
