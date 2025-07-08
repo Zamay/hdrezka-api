@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HdRezka API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .error {
+            background: #ffebee;
+            border-color: #f44336;
+            color: #d32f2f;
+        }
+        .success {
+            background: #e8f5e8;
+            border-color: #4CAF50;
+            color: #2e7d32;
+        }
+        .loading {
+            color: #ff9800;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .translation-item {
+            padding: 5px;
+            margin: 2px 0;
+            background: #e3f2fd;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .translation-item:hover {
+            background: #bbdefb;
+        }
+        #seasonEpisodeControls {
+            display: none; /* За замовчуванням приховано, показуємо для серіалів */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🔑 Авторизація (для обходу блокування)</h2>
+        <div id="loginContainer">
+            <div class="form-group">
+                <label for="login">Логін:</label>
+                <input type="text" id="login" placeholder="Ваш логін на hdrezka">
+            </div>
+            <div class="form-group">
+                <label for="password">Пароль:</label>
+                <input type="password" id="password" placeholder="Ваш пароль">
+            </div>
+            <button onclick="login()">Увійти</button>
+        </div>
+        <div id="logoutContainer" style="display: none;">
+            <p id="loggedInStatus" class="result success" style="text-align: center;"></p>
+            <button onclick="logout()" style="background-color: #f44336; margin-top: 10px;">Вийти</button>
+        </div>
+        <div id="loginResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>🎬 HdRezka API Tester</h2>
+        
+        <div class="form-group">
+            <label for="url">URL сайту:</label>
+            <input type="url" id="url" placeholder="https://hdrezka.ag/..." 
+                   value="https://hdrezka.ag/films/fiction/500-interstellar-2014.html">
+        </div>
+
+        <button onclick="parseContent()">📥 Парсити контент</button>
+        <div id="parseResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="container" id="streamContainer" style="display: none;">
+        <h2>🎥 Отримати стрім</h2>
+        
+        <div class="form-group">
+            <label for="translation">Переклад:</label>
+            <select id="translation"></select>
+        </div>
+
+        <div id="seasonEpisodeControls">
+            <div class="form-group">
+                <label for="season">Сезон:</label>
+                <select id="season"></select>
+            </div>
+
+            <div class="form-group">
+                <label for="episode">Серія:</label>
+                <select id="episode"></select>
+            </div>
+        </div>
+
+        <button onclick="getStream()">🎬 Отримати стрім</button>
+        <div id="streamResult" class="result" style="display: none;"></div>
+        
+        <div id="videoContainer" style="display: none; margin-top: 20px;">
+            <h3>📺 Відео плеєр</h3>
+            <div class="form-group">
+                <label for="qualitySelect">Якість відео:</label>
+                <select id="qualitySelect" onchange="changeVideoQuality()"></select>
+            </div>
+            <video id="videoPlayer" controls style="width: 100%; max-width: 800px; height: auto;">
+                Ваш браузер не підтримує відео
+            </video>
+            <div id="videoInfo" style="margin-top: 10px; font-size: 14px; color: #666;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api'; // Відносний шлях для роботи на Vercel
+        let currentData = null; // Зберігає дані, отримані після парсингу (назва, переклади, сезони)
+        let currentStreamData = null; // Зберігає дані стріму (посилання на відео, сезон, серія)
+        let sessionCookie = localStorage.getItem('hdrezkaSessionCookie') || null; // Завантажуємо куки з localStorage при старті
+
+        const urlInput = document.getElementById('url');
+        const parseResultDiv = document.getElementById('parseResult');
+        const streamContainerDiv = document.getElementById('streamContainer');
+        const translationSelect = document.getElementById('translation');
+        const seasonSelect = document.getElementById('season');
+        const episodeSelect = document.getElementById('episode');
+        const streamResultDiv = document.getElementById('streamResult');
+        const videoContainerDiv = document.getElementById('videoContainer');
+        const qualitySelect = document.getElementById('qualitySelect');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const videoInfoDiv = document.getElementById('videoInfo');
+        const seasonEpisodeControls = document.getElementById('seasonEpisodeControls');
+        const loginInput = document.getElementById('login');
+        const passwordInput = document.getElementById('password');
+        const loginResultDiv = document.getElementById('loginResult');
+        const loginContainer = document.getElementById('loginContainer');
+        const logoutContainer = document.getElementById('logoutContainer');
+        const loggedInStatus = document.getElementById('loggedInStatus');
+
+        function showResult(element, data, isError = false) {
+            element.style.display = 'block';
+            element.className = `result ${isError ? 'error' : 'success'}`;
+            element.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        }
+
+        function showLoading(element, message = 'Завантаження...') {
+            element.style.display = 'block';
+            element.className = 'result loading';
+            element.textContent = message;
+        }
+
+        function updateLoginUI() {
+            if (sessionCookie) {
+                loginContainer.style.display = 'none';
+                logoutContainer.style.display = 'block';
+                loginResultDiv.style.display = 'none';
+                loggedInStatus.textContent = 'Ви авторизовані. Можна парсити контент.';
+            } else {
+                loginContainer.style.display = 'block';
+                logoutContainer.style.display = 'none';
+                loginInput.value = '';
+                passwordInput.value = '';
+            }
+        }
+
+        function logout() {
+            if (confirm('Ви впевнені, що хочете вийти?')) {
+                sessionCookie = null;
+                localStorage.removeItem('hdrezkaSessionCookie');
+                loginResultDiv.style.display = 'none';
+                alert('Ви вийшли з акаунту.');
+                updateLoginUI();
+            }
+        }
+
+        async function login() {
+            const login = loginInput.value;
+            const password = passwordInput.value;
+
+            if (!login || !password) {
+                alert('Введіть логін та пароль!');
+                return;
+            }
+
+            showLoading(loginResultDiv, 'Виконується вхід...');
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ login, password })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Помилка авторизації');
+                }
+
+                sessionCookie = data.cookie; // Зберігаємо куки у змінну
+                localStorage.setItem('hdrezkaSessionCookie', data.cookie); // Зберігаємо в localStorage
+                showResult(loginResultDiv, 'Авторизація успішна! Тепер можна парсити контент.');
+                updateLoginUI();
+            } catch (error) {
+                sessionCookie = null;
+                localStorage.removeItem('hdrezkaSessionCookie');
+                showResult(loginResultDiv, `Помилка: ${error.message}`, true);
+            }
+        }
+
+        async function parseContent() {
+            const url = urlInput.value;
+            if (!url) {
+                alert('Введіть URL!');
+                return;
+            }
+
+            showLoading(parseResultDiv, 'Парсинг контенту...');
+            streamContainerDiv.style.display = 'none'; // Приховуємо форму стріму
+            videoContainerDiv.style.display = 'none'; // Приховуємо відеоплеєр
+            
+            try {
+                const response = await fetch(`${API_BASE}/parse`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, cookie: sessionCookie }) // Надсилаємо куки
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Помилка сервера при парсингу');
+                }
+
+                currentData = data;
+                showResult(parseResultDiv, data);
+                
+                // Заповнюємо переклади
+                fillTranslations(data.translations);
+
+                // Залежно від типу контенту, показуємо/ховаємо елементи для серій
+                if (data.type === 'video.tv_series') {
+                    seasonEpisodeControls.style.display = 'block';
+                    fillSeasonsAndEpisodes(data);
+                } else {
+                    seasonEpisodeControls.style.display = 'none';
+                }
+                
+                streamContainerDiv.style.display = 'block'; // Показуємо форму стріму
+                
+            } catch (error) {
+                showResult(parseResultDiv, `Помилка: ${error.message}`, true);
+            }
+        }
+
+        function fillTranslations(translations) {
+            translationSelect.innerHTML = '';
+            for (const [name, id] of Object.entries(translations)) {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = name;
+                translationSelect.appendChild(option);
+            }
+        }
+
+        // Заповнює сезони та епізоди для серіалів
+        function fillSeasonsAndEpisodes(data) {
+            seasonSelect.innerHTML = '';
+            episodeSelect.innerHTML = '';
+
+            const selectedTranslatorId = translationSelect.value;
+            const translatorName = Object.keys(data.translations).find(key => data.translations[key] === selectedTranslatorId);
+            
+            if (translatorName && data.seasons && data.seasons[translatorName]) {
+                const seasonsInfoForTranslator = data.seasons[translatorName];
+                
+                // Заповнюємо сезони
+                for (const [id, name] of Object.entries(seasonsInfoForTranslator.seasons)) {
+                    const option = document.createElement('option');
+                    option.value = id;
+                    option.textContent = name;
+                    seasonSelect.appendChild(option);
+                }
+                
+                // Заповнюємо серії для першого сезону (або вибраного)
+                if (Object.keys(seasonsInfoForTranslator.seasons).length > 0) {
+                    const firstSeasonId = Object.keys(seasonsInfoForTranslator.seasons)[0];
+                    fillEpisodes(firstSeasonId);
+                }
+            }
+        }
+
+        function fillEpisodes(seasonId) {
+            episodeSelect.innerHTML = '';
+            
+            if (!currentData || !currentData.seasons) return;
+            
+            const selectedTranslatorId = translationSelect.value;
+            const translatorName = Object.keys(currentData.translations).find(key => currentData.translations[key] === selectedTranslatorId);
+
+            if (translatorName && currentData.seasons[translatorName] && 
+                currentData.seasons[translatorName].episodes && 
+                currentData.seasons[translatorName].episodes[seasonId]) {
+                
+                const episodes = currentData.seasons[translatorName].episodes[seasonId];
+                for (const [id, name] of Object.entries(episodes)) {
+                    const option = document.createElement('option');
+                    option.value = id;
+                    option.textContent = name;
+                    episodeSelect.appendChild(option);
+                }
+            }
+        }
+
+        // Обробник зміни перекладу (для серіалів)
+        translationSelect.addEventListener('change', function() {
+            if (currentData && currentData.type === 'video.tv_series') {
+                fillSeasonsAndEpisodes(currentData);
+            }
+        });
+
+        // Обробник зміни сезону
+        seasonSelect.addEventListener('change', function() {
+            fillEpisodes(this.value);
+        });
+
+        async function getStream() {
+            const url = urlInput.value;
+            const translation = translationSelect.value;
+            let season = null;
+            let episode = null;
+
+            if (!url || !translation) {
+                alert('Спочатку парсіть контент та виберіть переклад!');
+                return;
+            }
+
+            if (currentData && currentData.type === 'video.tv_series') {
+                season = seasonSelect.value;
+                episode = episodeSelect.value;
+                if (!season || !episode) {
+                    alert('Для серіалу виберіть сезон і серію!');
+                    return;
+                }
+            }
+
+            showLoading(streamResultDiv, 'Отримання стріму...');
+            videoContainerDiv.style.display = 'none'; // Приховуємо плеєр під час нового запиту
+            
+            try {
+                const requestData = { url, translation, cookie: sessionCookie }; // Надсилаємо куки
+                if (season) requestData.season = season;
+                if (episode) requestData.episode = episode;
+
+                const response = await fetch(`${API_BASE}/stream`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Помилка сервера при отриманні стріму');
+                }
+
+                currentStreamData = data;
+                showResult(streamResultDiv, data);
+                
+                // Показуємо відео плеєр
+                if (data.videos && Object.keys(data.videos).length > 0) {
+                    showVideoPlayer(data.videos);
+                } else {
+                    showResult(streamResultDiv, 'Не знайдено доступних відеопотоків.', true);
+                }
+                
+            } catch (error) {
+                showResult(streamResultDiv, `Помилка: ${error.message}`, true);
+            }
+        }
+
+        function showVideoPlayer(videos) {
+            const qualities = Object.keys(videos).sort((a, b) => {
+                const aNum = parseInt(a); // Припускаємо, що якість у форматі "1080p", "720p"
+                const bNum = parseInt(b);
+                return bNum - aNum; // Сортування від найвищої до найнижчої якості
+            });
+            
+            qualitySelect.innerHTML = ''; // Очищаємо попередні опції
+            qualities.forEach(quality => {
+                const option = document.createElement('option');
+                option.value = quality;
+                option.textContent = quality;
+                qualitySelect.appendChild(option);
+            });
+            
+            if (qualities.length > 0) {
+                const bestQuality = qualities[0];
+                qualitySelect.value = bestQuality;
+                videoPlayer.src = videos[bestQuality];
+                videoPlayer.load(); // Завантажуємо нове відео
+                updateVideoInfo(bestQuality, videos[bestQuality]);
+            }
+            
+            videoContainerDiv.style.display = 'block';
+        }
+
+        function changeVideoQuality() {
+            const selectedQuality = qualitySelect.value;
+            
+            if (currentStreamData && currentStreamData.videos[selectedQuality]) {
+                const currentTime = videoPlayer.currentTime; // Зберігаємо поточний час
+                videoPlayer.src = currentStreamData.videos[selectedQuality];
+                videoPlayer.load();
+                videoPlayer.currentTime = currentTime; // Відновлюємо час
+                videoPlayer.play(); // Спроба продовжити відтворення
+                updateVideoInfo(selectedQuality, currentStreamData.videos[selectedQuality]);
+            }
+        }
+
+        function updateVideoInfo(quality, url) {
+            const urlShort = url.length > 100 ? url.substring(0, 100) + '...' : url;
+            
+            let seasonEpisode = '';
+            if (currentStreamData.season && currentStreamData.episode) {
+                seasonEpisode = `Сезон ${currentStreamData.season}, Серія ${currentStreamData.episode} | `;
+            }
+            
+            videoInfoDiv.innerHTML = `
+                <strong>Якість:</strong> ${quality} | 
+                ${seasonEpisode}
+                <strong>URL:</strong> <a href="${url}" target="_blank" style="color: #4CAF50;">${urlShort}</a>
+            `;
+        }
+
+        // Автозаповнення при завантаженні
+        window.addEventListener('load', function() {
+            updateLoginUI(); // Оновлюємо інтерфейс авторизації при завантаженні
+            if (urlInput.value) {
+                // Можна автоматично парсити при завантаженні, якщо URL вже є
+                // parseContent(); 
+            }
+        });
+    </script>
+</body>
+</html>
